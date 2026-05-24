@@ -2,7 +2,7 @@ import type {
   FaceLandmarkerResult,
   HandLandmarkerResult,
   NormalizedLandmark,
-  PoseLandmarkerResult
+  PoseLandmarkerResult,
 } from "@mediapipe/tasks-vision";
 
 type DrawSize = {
@@ -13,6 +13,16 @@ type DrawSize = {
 type DrawOptions = {
   mirrored?: boolean;
 };
+
+type DrawPoint = {
+  x: number;
+  y: number;
+};
+
+const DRAW_SMOOTH_ALPHA = 0.35;
+const DRAW_MIN_MOVE_PX = 1.5;
+const drawCache = new Map<string, Map<number, DrawPoint>>();
+let lastDrawSize: DrawSize | null = null;
 
 const HAND_CONNECTIONS = [
   [0, 1],
@@ -35,7 +45,7 @@ const HAND_CONNECTIONS = [
   [17, 18],
   [18, 19],
   [19, 20],
-  [0, 17]
+  [0, 17],
 ] as const;
 
 const POSE_CONNECTIONS = [
@@ -54,7 +64,7 @@ const POSE_CONNECTIONS = [
   [27, 29],
   [29, 31],
   [28, 30],
-  [30, 32]
+  [30, 32],
 ] as const;
 
 export function clearCanvas(ctx: CanvasRenderingContext2D, size: DrawSize) {
@@ -69,53 +79,76 @@ export function drawTrackingResults(
     hands: HandLandmarkerResult | null;
     pose: PoseLandmarkerResult | null;
   },
-  options: DrawOptions = {}
+  options: DrawOptions = {},
 ) {
   clearCanvas(ctx, size);
+  ensureDrawCache(size);
 
   if (results.pose?.landmarks?.length) {
-    for (const landmarks of results.pose.landmarks) {
-      drawConnections(ctx, landmarks, POSE_CONNECTIONS, size, "#48f7c4", 3, options);
-      drawPoints(ctx, landmarks, size, "#bfffee", 3.5, options, 0.65);
-    }
+    results.pose.landmarks.forEach((landmarks, index) => {
+      const points = getStablePoints(landmarks, size, options, `pose-${index}`);
+      drawConnections(
+        ctx,
+        landmarks,
+        POSE_CONNECTIONS,
+        points,
+        "#48f7c4",
+        3,
+        0.45,
+      );
+      drawPoints(ctx, landmarks, points, "#bfffee", 3.5, 0.65);
+    });
   }
 
   if (results.face?.faceLandmarks?.length) {
-    for (const landmarks of results.face.faceLandmarks) {
-      drawPoints(ctx, landmarks, size, "#5ed7ff", 1.45, options, 0.8);
-    }
+    results.face.faceLandmarks.forEach((landmarks, index) => {
+      const points = getStablePoints(landmarks, size, options, `face-${index}`);
+      drawPoints(ctx, landmarks, points, "#5ed7ff", 1.45, 0.8);
+    });
   }
 
   if (results.hands?.landmarks?.length) {
-    for (const landmarks of results.hands.landmarks) {
-      drawConnections(ctx, landmarks, HAND_CONNECTIONS, size, "#ff3ee2", 2.5, options);
-      drawPoints(ctx, landmarks, size, "#ffd8fb", 4, options, 0.8);
-    }
+    results.hands.landmarks.forEach((landmarks, index) => {
+      const points = getStablePoints(landmarks, size, options, `hand-${index}`);
+      drawConnections(
+        ctx,
+        landmarks,
+        HAND_CONNECTIONS,
+        points,
+        "#ff3ee2",
+        2.5,
+        0.45,
+      );
+      drawPoints(ctx, landmarks, points, "#ffd8fb", 4, 0.8);
+    });
   }
 }
 
 function drawPoints(
   ctx: CanvasRenderingContext2D,
   landmarks: NormalizedLandmark[],
-  size: DrawSize,
+  points: DrawPoint[],
   color: string,
   radius: number,
-  options: DrawOptions,
-  minVisibility = 0
+  minVisibility = 0,
 ) {
   ctx.save();
   ctx.fillStyle = color;
   ctx.shadowColor = color;
   ctx.shadowBlur = 8;
 
-  for (const landmark of landmarks) {
+  for (let index = 0; index < landmarks.length; index += 1) {
+    const landmark = landmarks[index];
     if ((landmark.visibility ?? 1) < minVisibility) {
       continue;
     }
 
-    const { x, y } = projectLandmark(landmark, size, options);
+    const point = points[index];
+    if (!point) {
+      continue;
+    }
     ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -126,10 +159,10 @@ function drawConnections(
   ctx: CanvasRenderingContext2D,
   landmarks: NormalizedLandmark[],
   connections: readonly (readonly [number, number])[],
-  size: DrawSize,
+  points: DrawPoint[],
   color: string,
   lineWidth: number,
-  options: DrawOptions
+  minVisibility = 0.45,
 ) {
   ctx.save();
   ctx.strokeStyle = color;
@@ -143,12 +176,20 @@ function drawConnections(
     const start = landmarks[startIndex];
     const end = landmarks[endIndex];
 
-    if (!start || !end || (start.visibility ?? 1) < 0.45 || (end.visibility ?? 1) < 0.45) {
+    if (
+      !start ||
+      !end ||
+      (start.visibility ?? 1) < minVisibility ||
+      (end.visibility ?? 1) < minVisibility
+    ) {
       continue;
     }
 
-    const startPoint = projectLandmark(start, size, options);
-    const endPoint = projectLandmark(end, size, options);
+    const startPoint = points[startIndex];
+    const endPoint = points[endIndex];
+    if (!startPoint || !endPoint) {
+      continue;
+    }
     ctx.beginPath();
     ctx.moveTo(startPoint.x, startPoint.y);
     ctx.lineTo(endPoint.x, endPoint.y);
@@ -161,12 +202,70 @@ function drawConnections(
 function projectLandmark(
   landmark: NormalizedLandmark,
   size: DrawSize,
-  options: DrawOptions
+  options: DrawOptions,
 ) {
   const x = options.mirrored ? 1 - landmark.x : landmark.x;
 
   return {
     x: x * size.width,
-    y: landmark.y * size.height
+    y: landmark.y * size.height,
   };
+}
+
+function ensureDrawCache(size: DrawSize) {
+  if (
+    !lastDrawSize ||
+    lastDrawSize.width !== size.width ||
+    lastDrawSize.height !== size.height
+  ) {
+    drawCache.clear();
+    lastDrawSize = { ...size };
+  }
+}
+
+function getStablePoints(
+  landmarks: NormalizedLandmark[],
+  size: DrawSize,
+  options: DrawOptions,
+  cacheKey: string,
+) {
+  let cache = drawCache.get(cacheKey);
+  if (!cache) {
+    cache = new Map();
+    drawCache.set(cacheKey, cache);
+  }
+
+  const points: DrawPoint[] = [];
+
+  for (let index = 0; index < landmarks.length; index += 1) {
+    const landmark = landmarks[index];
+    if (!landmark) {
+      continue;
+    }
+
+    const rawPoint = projectLandmark(landmark, size, options);
+    const previous = cache.get(index);
+    let nextPoint = rawPoint;
+
+    if (previous) {
+      const smoothed = {
+        x: blend(rawPoint.x, previous.x, DRAW_SMOOTH_ALPHA),
+        y: blend(rawPoint.y, previous.y, DRAW_SMOOTH_ALPHA),
+      };
+      const distance = Math.hypot(
+        smoothed.x - previous.x,
+        smoothed.y - previous.y,
+      );
+      nextPoint = distance < DRAW_MIN_MOVE_PX ? previous : smoothed;
+    }
+
+    cache.set(index, nextPoint);
+    points[index] = nextPoint;
+  }
+
+  return points;
+}
+
+function blend(raw: number, previous: number, alpha: number) {
+  return alpha * raw + (1 - alpha) * previous;
 }

@@ -3,20 +3,25 @@
 import { RefObject, useEffect } from "react";
 import { formatResolution } from "@/lib/utils/format";
 import { useTrackingStore } from "@/store/trackingStore";
+import { useFPS } from "@/lib/utils/fps";
 
 type TrackingDebugPanelProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
 };
 
 export function TrackingDebugPanel({ videoRef }: TrackingDebugPanelProps) {
-  const fps = useTrackingStore((state) => state.fps);
+  const fps = useFPS();
   const initialized = useTrackingStore((state) => state.initialized);
   const webcamReady = useTrackingStore((state) => state.webcamReady);
   const videoSize = useTrackingStore((state) => state.videoSize);
-  const faceCount = useTrackingStore((state) => state.face?.faceLandmarks.length ?? 0);
-  const handCount = useTrackingStore((state) => state.hands?.landmarks.length ?? 0);
+  const faceCount = useTrackingStore(
+    (state) => state.face?.faceLandmarks.length ?? 0,
+  );
+  const handCount = useTrackingStore(
+    (state) => state.hands?.landmarks.length ?? 0,
+  );
   const poseActive = useTrackingStore(
-    (state) => (state.pose?.landmarks.length ?? 0) > 0
+    (state) => (state.pose?.landmarks.length ?? 0) > 0,
   );
   const setVideoSize = useTrackingStore((state) => state.setVideoSize);
 
@@ -29,7 +34,7 @@ export function TrackingDebugPanel({ videoRef }: TrackingDebugPanelProps) {
     const updateSize = () => {
       setVideoSize({
         width: video.videoWidth,
-        height: video.videoHeight
+        height: video.videoHeight,
       });
     };
 
@@ -47,7 +52,9 @@ export function TrackingDebugPanel({ videoRef }: TrackingDebugPanelProps) {
         </span>
         <span
           className={`h-2 w-2 rounded-full ${
-            initialized ? "bg-emerald-300 shadow-[0_0_12px_#6ee7b7]" : "bg-amber-300"
+            initialized
+              ? "bg-emerald-300 shadow-[0_0_12px_#6ee7b7]"
+              : "bg-amber-300"
           }`}
         />
       </div>

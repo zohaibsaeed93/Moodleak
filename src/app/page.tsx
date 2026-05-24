@@ -6,12 +6,13 @@ import { ReactionPanel } from "@/components/ReactionPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { Webcam } from "@/components/Webcam";
 import { useTrackingStore } from "@/store/trackingStore";
+import { useFPS } from "@/lib/utils/fps";
 import { Settings2 } from "lucide-react";
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const fps = useTrackingStore((state) => state.fps);
+  const fps = useFPS();
   const initialized = useTrackingStore((state) => state.initialized);
   const webcamReady = useTrackingStore((state) => state.webcamReady);
   const faceCount = useTrackingStore(
@@ -46,9 +47,7 @@ export default function Home() {
                 background: trackingActive
                   ? "var(--accent)"
                   : "var(--text-muted)",
-                boxShadow: trackingActive
-                  ? "0 0 18px var(--accent)"
-                  : "none",
+                boxShadow: trackingActive ? "0 0 18px var(--accent)" : "none",
               }}
             />
           </div>
@@ -94,7 +93,10 @@ export default function Home() {
         </div>
       </section>
 
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </main>
   );
 }

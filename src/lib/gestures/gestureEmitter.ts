@@ -4,11 +4,19 @@ import type {
   PoseLandmarkerResult,
 } from "@mediapipe/tasks-vision";
 import { eventBus, type ReactionEventName } from "@/lib/events/eventBus";
+import { GestureStabilizer } from "@/lib/tracking/stabilizer";
 import { useTrackingStore } from "@/store/trackingStore";
 
-const COOLDOWN_MS = 800;
-const CONFIDENCE_THRESHOLD = 0.75;
-const RELEASE_THRESHOLD = 0.55;
+const COOLDOWN_MS = 1200;
+const REQUIRED_FRAMES = 4;
+const HOLD_RELEASE_FRAMES = 3;
+const GLOBAL_WINDOW_MS = 500;
+const GLOBAL_MAX_GESTURES = 2;
+
+const FACE_CONFIDENCE_THRESHOLD = 0.82;
+const GESTURE_CONFIDENCE_THRESHOLD = 0.75;
+const HAND_VISIBILITY_THRESHOLD = 0.75;
+const POSE_VISIBILITY_THRESHOLD = 0.7;
 
 type GestureContext = {
   hands: HandLandmarkerResult | null;
@@ -16,9 +24,17 @@ type GestureContext = {
   faceLandmarks: NormalizedLandmark[] | null;
 };
 
+type GestureType = "face" | "hand" | "pose";
+
+type GestureScore = {
+  confidence: number;
+  visibility?: number;
+};
+
 type GestureEvaluator = {
   name: ReactionEventName;
-  evaluate: (context: GestureContext) => number;
+  type: GestureType;
+  evaluate: (context: GestureContext) => GestureScore;
 };
 
 const FACE_LANDMARKS = {
@@ -56,35 +72,82 @@ const HAND_LANDMARKS = {
 const GESTURE_EVALUATORS: GestureEvaluator[] = [
   {
     name: "SMILE_DETECTED",
-    evaluate: ({ faceLandmarks }) => getSmileConfidence(faceLandmarks),
+    type: "face",
+    evaluate: ({ faceLandmarks }) => ({
+      confidence: getSmileConfidence(faceLandmarks),
+    }),
   },
   {
     name: "SAD_DETECTED",
-    evaluate: ({ faceLandmarks }) => getSadConfidence(faceLandmarks),
+    type: "face",
+    evaluate: ({ faceLandmarks }) => ({
+      confidence: getSadConfidence(faceLandmarks),
+    }),
   },
   {
     name: "SURPRISED_DETECTED",
-    evaluate: ({ faceLandmarks }) => getSurprisedConfidence(faceLandmarks),
+    type: "face",
+    evaluate: ({ faceLandmarks }) => ({
+      confidence: getSurprisedConfidence(faceLandmarks),
+    }),
   },
   {
     name: "ARMS_RAISED_DETECTED",
-    evaluate: ({ pose }) => getArmsRaisedConfidence(pose),
+    type: "pose",
+    evaluate: ({ pose }) => getArmsRaisedScore(pose),
   },
   {
     name: "PEACE_SIGN_DETECTED",
-    evaluate: ({ hands }) => getPeaceSignConfidence(hands),
+    type: "hand",
+    evaluate: ({ hands }) => getPeaceSignScore(hands),
   },
   {
     name: "THUMBS_UP_DETECTED",
-    evaluate: ({ hands }) => getThumbsUpConfidence(hands),
+    type: "hand",
+    evaluate: ({ hands }) => getThumbsUpScore(hands),
   },
 ];
 
 export function startGestureEmitter() {
   const lastEmitted: Partial<Record<ReactionEventName, number>> = {};
-  const activeStates: Partial<Record<ReactionEventName, boolean>> = {};
+  const inactiveFrames: Partial<Record<ReactionEventName, number>> = {};
+  const activeGestures = new Set<ReactionEventName>();
+  const stabilizers = new Map<ReactionEventName, GestureStabilizer>();
+  const recentEmits: Array<{ name: ReactionEventName; time: number }> = [];
   let active = true;
   let rafId: number | null = null;
+
+  const getStabilizer = (name: ReactionEventName) => {
+    const existing = stabilizers.get(name);
+    if (existing) {
+      return existing;
+    }
+
+    const stabilizer = new GestureStabilizer({
+      requiredFrames: REQUIRED_FRAMES,
+      cooldownMs: COOLDOWN_MS,
+    });
+    stabilizers.set(name, stabilizer);
+    return stabilizer;
+  };
+
+  const canEmitGlobal = (name: ReactionEventName, now: number) => {
+    const windowStart = now - GLOBAL_WINDOW_MS;
+    while (recentEmits.length && recentEmits[0].time < windowStart) {
+      recentEmits.shift();
+    }
+
+    const uniqueGestures = new Set(recentEmits.map((entry) => entry.name));
+    if (
+      !uniqueGestures.has(name) &&
+      uniqueGestures.size >= GLOBAL_MAX_GESTURES
+    ) {
+      return false;
+    }
+
+    recentEmits.push({ name, time: now });
+    return true;
+  };
 
   const tick = () => {
     if (!active) {
@@ -96,24 +159,44 @@ export function startGestureEmitter() {
     const now = performance.now();
 
     for (const evaluator of GESTURE_EVALUATORS) {
-      const confidence = evaluator.evaluate({ hands, pose, faceLandmarks });
-      const isActive = activeStates[evaluator.name] ?? false;
+      const score = evaluator.evaluate({ hands, pose, faceLandmarks });
+      const isDetected = meetsThreshold(evaluator, score);
 
-      if (confidence >= CONFIDENCE_THRESHOLD) {
-        if (!isActive) {
-          const lastTime = lastEmitted[evaluator.name] ?? 0;
-          if (now - lastTime >= COOLDOWN_MS) {
-            lastEmitted[evaluator.name] = now;
-            eventBus.emit(evaluator.name, { confidence, timestamp: now });
-          }
-          activeStates[evaluator.name] = true;
+      if (isDetected) {
+        inactiveFrames[evaluator.name] = 0;
+      } else {
+        const missedFrames = (inactiveFrames[evaluator.name] ?? 0) + 1;
+        inactiveFrames[evaluator.name] = missedFrames;
+        if (missedFrames >= HOLD_RELEASE_FRAMES) {
+          activeGestures.delete(evaluator.name);
         }
+      }
+
+      const stabilizer = getStabilizer(evaluator.name);
+      const { emit } = stabilizer.update(isDetected, now);
+      if (!emit) {
         continue;
       }
 
-      if (confidence <= RELEASE_THRESHOLD) {
-        activeStates[evaluator.name] = false;
+      if (activeGestures.has(evaluator.name)) {
+        continue;
       }
+
+      const lastTime = lastEmitted[evaluator.name] ?? 0;
+      if (now - lastTime < COOLDOWN_MS) {
+        continue;
+      }
+
+      if (!canEmitGlobal(evaluator.name, now)) {
+        continue;
+      }
+
+      lastEmitted[evaluator.name] = now;
+      activeGestures.add(evaluator.name);
+      eventBus.emit(evaluator.name, {
+        confidence: score.confidence,
+        timestamp: now,
+      });
     }
 
     rafId = requestAnimationFrame(tick);
@@ -235,36 +318,64 @@ function getArmsRaisedConfidence(pose: PoseLandmarkerResult | null) {
   return clamp((minRaise - 0.06) / 0.18, 0, 1);
 }
 
-function getPeaceSignConfidence(hands: HandLandmarkerResult | null) {
-  if (!hands?.landmarks?.length) {
-    return 0;
+function getArmsRaisedScore(pose: PoseLandmarkerResult | null): GestureScore {
+  const confidence = getArmsRaisedConfidence(pose);
+  if (!pose?.landmarks?.length) {
+    return { confidence, visibility: 0 };
   }
 
-  let best = 0;
-  for (const hand of hands.landmarks) {
-    const confidence = evaluatePeaceSign(hand);
-    if (confidence > best) {
-      best = confidence;
-    }
-  }
-
-  return best;
+  const visibility = averageVisibility(pose.landmarks[0]);
+  return { confidence, visibility };
 }
 
-function getThumbsUpConfidence(hands: HandLandmarkerResult | null) {
+function getPeaceSignScore(hands: HandLandmarkerResult | null): GestureScore {
   if (!hands?.landmarks?.length) {
-    return 0;
+    return { confidence: 0 };
   }
 
   let best = 0;
+  let bestVisibility = 0;
   for (const hand of hands.landmarks) {
-    const confidence = evaluateThumbsUp(hand);
+    const confidence = evaluatePeaceSign(hand);
+    const visibility = averageVisibility(hand);
     if (confidence > best) {
       best = confidence;
+      bestVisibility = visibility;
     }
   }
 
-  return best;
+  return { confidence: best, visibility: bestVisibility };
+}
+
+function getThumbsUpScore(hands: HandLandmarkerResult | null): GestureScore {
+  if (!hands?.landmarks?.length) {
+    return { confidence: 0 };
+  }
+
+  let best = 0;
+  let bestVisibility = 0;
+  for (const hand of hands.landmarks) {
+    const confidence = evaluateThumbsUp(hand);
+    const visibility = averageVisibility(hand);
+    if (confidence > best) {
+      best = confidence;
+      bestVisibility = visibility;
+    }
+  }
+
+  return { confidence: best, visibility: bestVisibility };
+}
+
+function averageVisibility(landmarks: NormalizedLandmark[]) {
+  let sum = 0;
+  let count = 0;
+  for (const lm of landmarks) {
+    if (lm && typeof lm.visibility === "number") {
+      sum += lm.visibility;
+      count += 1;
+    }
+  }
+  return count ? sum / count : 0;
 }
 
 function evaluatePeaceSign(landmarks: NormalizedLandmark[]) {
@@ -366,6 +477,32 @@ function evaluateThumbsUp(landmarks: NormalizedLandmark[]) {
   const penalty = extendedCount * 0.2;
 
   return clamp(0.9 - penalty, 0, 1);
+}
+
+function meetsThreshold(evaluator: GestureEvaluator, score: GestureScore) {
+  if (!score || typeof score.confidence !== "number") {
+    return false;
+  }
+
+  if (evaluator.type === "face") {
+    return score.confidence >= FACE_CONFIDENCE_THRESHOLD;
+  }
+
+  if (evaluator.type === "hand") {
+    if ((score.visibility ?? 0) < HAND_VISIBILITY_THRESHOLD) {
+      return false;
+    }
+    return score.confidence >= GESTURE_CONFIDENCE_THRESHOLD;
+  }
+
+  if (evaluator.type === "pose") {
+    if ((score.visibility ?? 0) < POSE_VISIBILITY_THRESHOLD) {
+      return false;
+    }
+    return score.confidence >= GESTURE_CONFIDENCE_THRESHOLD;
+  }
+
+  return score.confidence >= GESTURE_CONFIDENCE_THRESHOLD;
 }
 
 function isFingerExtended(

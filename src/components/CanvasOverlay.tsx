@@ -1,10 +1,11 @@
 "use client";
 
 import { RefObject, useEffect, useRef } from "react";
-import { loadFaceLandmarker } from "@/lib/mediapipe/face";
-import { loadHandLandmarker } from "@/lib/mediapipe/hands";
-import { loadPoseLandmarker } from "@/lib/mediapipe/pose";
+import { loadFaceLandmarker, smoothFaceResult } from "@/lib/mediapipe/face";
+import { loadHandLandmarker, smoothHandResult } from "@/lib/mediapipe/hands";
+import { loadPoseLandmarker, smoothPoseResult } from "@/lib/mediapipe/pose";
 import { clearCanvas, drawTrackingResults } from "@/lib/drawing/drawLandmarks";
+import { recordFrame } from "@/lib/utils/fps";
 import { useTrackingStore } from "@/store/trackingStore";
 
 type CanvasOverlayProps = {
@@ -15,7 +16,6 @@ export function CanvasOverlay({ videoRef }: CanvasOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const requestRef = useRef<number | null>(null);
   const lastVideoTimeRef = useRef(-1);
-  const fpsSampleRef = useRef({ frames: 0, startedAt: 0 });
   const webcamReady = useTrackingStore((state) => state.webcamReady);
 
   useEffect(() => {
@@ -41,19 +41,18 @@ export function CanvasOverlay({ videoRef }: CanvasOverlayProps) {
       }
 
       try {
-        const [faceLandmarker, handLandmarker, poseLandmarker] = await Promise.all([
-          loadFaceLandmarker(),
-          loadHandLandmarker(),
-          loadPoseLandmarker()
-        ]);
+        const [faceLandmarker, handLandmarker, poseLandmarker] =
+          await Promise.all([
+            loadFaceLandmarker(),
+            loadHandLandmarker(),
+            loadPoseLandmarker(),
+          ]);
 
         if (cancelled) {
           return;
         }
 
         useTrackingStore.getState().setInitialized(true);
-        fpsSampleRef.current = { frames: 0, startedAt: performance.now() };
-
         const resizeCanvas = () => {
           const width = video.videoWidth;
           const height = video.videoHeight;
@@ -85,22 +84,16 @@ export function CanvasOverlay({ videoRef }: CanvasOverlayProps) {
               const face = faceLandmarker.detectForVideo(video, now);
               const hands = handLandmarker.detectForVideo(video, now);
               const pose = poseLandmarker.detectForVideo(video, now);
-              const results = { face, hands, pose, timestamp: now };
+              const results = {
+                face: smoothFaceResult(face),
+                hands: smoothHandResult(hands),
+                pose: smoothPoseResult(pose),
+                timestamp: now,
+              };
 
               useTrackingStore.getState().setTrackingResults(results);
               drawTrackingResults(ctx, canvas, results, { mirrored: true });
-
-              const fpsSample = fpsSampleRef.current;
-              fpsSample.frames += 1;
-              const elapsed = time - fpsSample.startedAt;
-
-              if (elapsed >= 500) {
-                useTrackingStore
-                  .getState()
-                  .setFps(Math.round((fpsSample.frames * 1000) / elapsed));
-                fpsSample.frames = 0;
-                fpsSample.startedAt = time;
-              }
+              recordFrame(now);
             }
           } else {
             clearCanvas(ctx, canvas);

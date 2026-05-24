@@ -116,11 +116,12 @@ export function ReactionPanel() {
           {active ? (
             <motion.div
               key={`${active.eventName}-${active.triggeredAt}`}
+              layoutId="active-card"
               className="flex h-full w-full flex-col items-center justify-center gap-3 text-center"
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              initial={{ opacity: 0, y: 12, scale: 0.92 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.98 }}
-              transition={{ duration: 0.28, ease: "easeOut" }}
+              exit={{ opacity: 0 }}
+              transition={{ type: "spring", stiffness: 280, damping: 22 }}
             >
               <div
                 className="pointer-events-none absolute inset-8 rounded-full blur-3xl"
@@ -130,9 +131,18 @@ export function ReactionPanel() {
                 <span className="text-5xl leading-none">
                   {active.config.emoji}
                 </span>
-                <span className="font-display text-2xl font-semibold text-[var(--text-primary)]">
-                  {active.config.label}
-                </span>
+                <AnimatePresence mode="wait">
+                  <motion.span
+                    key={active.eventName}
+                    className="font-display text-2xl font-semibold text-[var(--text-primary)]"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.18 }}
+                  >
+                    {active.config.label}
+                  </motion.span>
+                </AnimatePresence>
               </div>
               <div className="relative h-32 w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] sm:h-36">
                 <ReactionMedia
@@ -193,14 +203,14 @@ export function ReactionPanel() {
           {history.length ? (
             <motion.ul className="space-y-1.5" layout>
               <AnimatePresence initial={false}>
-                {history.map((item) => (
+                {history.map((item, index) => (
                   <motion.li
                     key={item.id}
                     layout
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 8 }}
-                    transition={{ duration: 0.18 }}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    transition={{ duration: 0.18, delay: index * 0.04 }}
                     className="flex items-center justify-between gap-3 rounded-lg px-1.5 py-1.5 text-xs transition hover:bg-[var(--bg-elevated)]"
                   >
                     <div className="flex min-w-0 items-center gap-2 text-[var(--text-primary)]">
