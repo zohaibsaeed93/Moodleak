@@ -6,9 +6,12 @@ import {
   EVENT_NAMES,
   eventBus,
   type ReactionEventName,
-  type ReactionEventPayload
+  type ReactionEventPayload,
 } from "@/lib/events/eventBus";
-import { reactionRegistry, type ReactionConfig } from "@/lib/effects/effectRegistry";
+import {
+  reactionRegistry,
+  type ReactionConfig,
+} from "@/lib/effects/effectRegistry";
 import { startGestureEmitter } from "@/lib/gestures/gestureEmitter";
 
 type ActiveReaction = {
@@ -42,7 +45,7 @@ export function ReactionPanel() {
       setActive({
         eventName,
         config,
-        triggeredAt: payload.timestamp
+        triggeredAt: payload.timestamp,
       });
 
       const loggedAt = Date.now();
@@ -52,7 +55,7 @@ export function ReactionPanel() {
           label: config.label,
           emoji: config.emoji,
           color: config.color,
-          timestamp: loggedAt
+          timestamp: loggedAt,
         };
         return [next, ...prev].slice(0, HISTORY_LIMIT);
       });
@@ -65,15 +68,19 @@ export function ReactionPanel() {
         setActive(null);
       }, config.duration);
     },
-    []
+    [],
   );
 
   useEffect(() => {
     const stopEmitter = startGestureEmitter();
-    const handlers = new Map<ReactionEventName, (payload: ReactionEventPayload) => void>();
+    const handlers = new Map<
+      ReactionEventName,
+      (payload: ReactionEventPayload) => void
+    >();
 
     for (const eventName of EVENT_NAMES) {
-      const handler = (payload: ReactionEventPayload) => handleEvent(eventName, payload);
+      const handler = (payload: ReactionEventPayload) =>
+        handleEvent(eventName, payload);
       handlers.set(eventName, handler);
       eventBus.on(eventName, handler);
     }
@@ -90,98 +97,143 @@ export function ReactionPanel() {
   }, [handleEvent]);
 
   return (
-    <aside className="flex h-full w-full flex-col gap-4 rounded-lg border border-cyan-300/20 bg-slate-950/60 p-4 shadow-2xl shadow-black/40 backdrop-blur">
+    <aside className="theme-surface flex h-[320px] w-full flex-col gap-4 overflow-hidden rounded-2xl border p-4 shadow-2xl shadow-black/10 backdrop-blur-xl lg:h-full">
       <header className="flex items-center justify-between">
-        <div>
-          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.32em] text-cyan-200/70">
-            Reaction Panel
-          </p>
-          <h2 className="mt-1 text-lg font-semibold text-white">Live reactions</h2>
-        </div>
+        <p className="font-mono text-[0.66rem] uppercase tracking-[0.28em] text-[var(--text-muted)]">
+          current
+        </p>
         <span
-          className={`h-2.5 w-2.5 rounded-full ${
-            active ? "bg-emerald-300 shadow-[0_0_12px_#6ee7b7]" : "bg-cyan-200/40"
-          }`}
+          className="h-2.5 w-2.5 rounded-full transition"
+          style={{
+            background: active ? "var(--accent)" : "var(--text-muted)",
+            boxShadow: active ? "0 0 16px var(--accent)" : "none",
+          }}
         />
       </header>
 
-      <div className="flex min-h-[220px] flex-1 items-center justify-center rounded-lg border border-cyan-200/10 bg-slate-950/40 p-4">
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-base)] p-4">
         <AnimatePresence mode="wait">
           {active ? (
             <motion.div
               key={`${active.eventName}-${active.triggeredAt}`}
-              className="flex w-full flex-col items-center justify-center gap-4 rounded-xl border px-4 py-5 text-center"
-              style={{ borderColor: active.config.color }}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="flex h-full w-full flex-col items-center justify-center gap-3 text-center"
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.98 }}
+              transition={{ duration: 0.28, ease: "easeOut" }}
             >
-              <div className="text-xs font-semibold uppercase tracking-[0.32em] text-cyan-200/70">
-                Current gesture
+              <div
+                className="pointer-events-none absolute inset-8 rounded-full blur-3xl"
+                style={{ background: "var(--accent-dim)" }}
+              />
+              <div className="relative flex items-center gap-3">
+                <span className="text-5xl leading-none">
+                  {active.config.emoji}
+                </span>
+                <span className="font-display text-2xl font-semibold text-[var(--text-primary)]">
+                  {active.config.label}
+                </span>
               </div>
-              <div className="flex items-center gap-2 text-lg font-semibold text-white">
-                <span className="text-2xl">{active.config.emoji}</span>
-                <span>{active.config.label}</span>
-              </div>
-              <div className="h-40 w-full">
-                <img
+              <div className="relative h-32 w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] sm:h-36">
+                <ReactionMedia
                   src={active.config.gifUrl}
                   alt={active.config.label}
-                  className="h-full w-full object-contain"
                 />
               </div>
             </motion.div>
           ) : (
             <motion.div
               key="idle"
-              className="flex w-full flex-col items-center justify-center gap-3 text-center"
+              className="relative grid h-full w-full place-items-center"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: 0.26 }}
             >
               <motion.div
-                className="h-14 w-14 rounded-full border border-cyan-200/30"
-                animate={{ opacity: [0.4, 1, 0.4], scale: [0.96, 1.02, 0.96] }}
-                transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+                className="absolute h-28 w-28 rounded-full border border-[var(--accent)]"
+                style={{ boxShadow: "0 0 46px var(--accent-dim)" }}
+                animate={{
+                  opacity: [0.18, 0.5, 0.18],
+                  scale: [0.86, 1.08, 0.86],
+                }}
+                transition={{
+                  duration: 3.2,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
               />
-              <p className="text-sm font-medium text-cyan-100/80">No reaction detected</p>
-              <p className="text-xs text-cyan-200/50">
-                Hold a gesture to trigger a reaction.
-              </p>
+              <div className="flex h-16 items-center gap-1.5">
+                {[0, 1, 2, 3, 4, 5, 6].map((bar) => (
+                  <motion.span
+                    key={bar}
+                    className="w-1 rounded-full bg-[var(--accent)]"
+                    animate={{ height: [14, 42, 18, 30, 14] }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: bar * 0.09,
+                    }}
+                    style={{ opacity: 0.58 }}
+                  />
+                ))}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      <section className="flex flex-col gap-2">
-        <div className="flex items-center justify-between text-[0.7rem] uppercase tracking-[0.3em] text-cyan-200/60">
+      <section className="flex min-h-24 flex-col gap-2">
+        <div className="flex items-center justify-between font-mono text-[0.62rem] uppercase tracking-[0.24em] text-[var(--text-muted)]">
           <span>History</span>
-          <span className="text-cyan-200/40">last {HISTORY_LIMIT}</span>
+          <span>last {HISTORY_LIMIT}</span>
         </div>
-        <div className="max-h-28 overflow-auto pr-1">
+        <div className="min-h-0 overflow-auto pr-1">
           {history.length ? (
-            <ul className="space-y-2">
-              {history.map((item) => (
-                <li
-                  key={item.id}
-                  className="flex items-center justify-between rounded-md border border-cyan-200/10 bg-slate-900/50 px-3 py-2 text-xs"
-                >
-                  <div className="flex items-center gap-2 text-cyan-50">
-                    <span className="text-base">{item.emoji}</span>
-                    <span className="font-medium" style={{ color: item.color }}>
-                      {item.label}
+            <motion.ul className="space-y-1.5" layout>
+              <AnimatePresence initial={false}>
+                {history.map((item) => (
+                  <motion.li
+                    key={item.id}
+                    layout
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    transition={{ duration: 0.18 }}
+                    className="flex items-center justify-between gap-3 rounded-lg px-1.5 py-1.5 text-xs transition hover:bg-[var(--bg-elevated)]"
+                  >
+                    <div className="flex min-w-0 items-center gap-2 text-[var(--text-primary)]">
+                      <span className="text-base text-[var(--accent-text)]">
+                        {item.emoji}
+                      </span>
+                      <span className="truncate font-display text-sm">
+                        {item.label}
+                      </span>
+                    </div>
+                    <span className="shrink-0 font-mono text-[0.62rem] text-[var(--text-muted)]">
+                      {formatTimestamp(item.timestamp)}
                     </span>
-                  </div>
-                  <span className="text-[0.65rem] text-cyan-200/50">
-                    {formatTimestamp(item.timestamp)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </motion.ul>
           ) : (
-            <p className="text-xs text-cyan-200/40">No gestures yet.</p>
+            <div className="space-y-1.5" aria-hidden="true">
+              {[0, 1, 2].map((row) => (
+                <motion.div
+                  key={row}
+                  className="h-7 rounded-lg bg-[var(--bg-elevated)]"
+                  animate={{ opacity: [0.16, 0.34, 0.16] }}
+                  transition={{
+                    duration: 2.4,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                    delay: row * 0.16,
+                  }}
+                />
+              ))}
+            </div>
           )}
         </div>
       </section>
@@ -189,10 +241,54 @@ export function ReactionPanel() {
   );
 }
 
+function ReactionMedia({ src, alt }: { src: string; alt: string }) {
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">(
+    "loading",
+  );
+
+  return (
+    <div className="relative h-full w-full">
+      {status !== "loaded" ? (
+        <motion.div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(110deg, var(--bg-surface), var(--bg-elevated), var(--bg-surface))",
+            backgroundSize: "200% 100%",
+          }}
+          animate={{ backgroundPosition: ["0% 0%", "200% 0%"] }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+        />
+      ) : null}
+
+      {status !== "error" ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={alt}
+          className={`h-full w-full object-contain transition-opacity duration-300 ${
+            status === "loaded" ? "opacity-100" : "opacity-0"
+          }`}
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+        />
+      ) : (
+        <div className="absolute inset-0 grid place-items-center">
+          <motion.div
+            className="h-16 w-16 rounded-full border border-[var(--accent)]"
+            animate={{ opacity: [0.24, 0.56, 0.24], scale: [0.9, 1.05, 0.9] }}
+            transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatTimestamp(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit"
+    second: "2-digit",
   });
 }

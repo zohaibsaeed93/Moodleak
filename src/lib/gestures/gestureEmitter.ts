@@ -1,4 +1,8 @@
-import type { HandLandmarkerResult, NormalizedLandmark, PoseLandmarkerResult } from "@mediapipe/tasks-vision";
+import type {
+  HandLandmarkerResult,
+  NormalizedLandmark,
+  PoseLandmarkerResult,
+} from "@mediapipe/tasks-vision";
 import { eventBus, type ReactionEventName } from "@/lib/events/eventBus";
 import { useTrackingStore } from "@/store/trackingStore";
 
@@ -21,14 +25,14 @@ const FACE_LANDMARKS = {
   leftMouth: 61,
   rightMouth: 291,
   upperLip: 13,
-  lowerLip: 14
+  lowerLip: 14,
 };
 
 const POSE_LANDMARKS = {
   leftShoulder: 11,
   rightShoulder: 12,
   leftWrist: 15,
-  rightWrist: 16
+  rightWrist: 16,
 };
 
 const HAND_LANDMARKS = {
@@ -46,34 +50,34 @@ const HAND_LANDMARKS = {
   ringTip: 16,
   pinkyMcp: 17,
   pinkyPip: 18,
-  pinkyTip: 20
+  pinkyTip: 20,
 };
 
 const GESTURE_EVALUATORS: GestureEvaluator[] = [
   {
     name: "SMILE_DETECTED",
-    evaluate: ({ faceLandmarks }) => getSmileConfidence(faceLandmarks)
+    evaluate: ({ faceLandmarks }) => getSmileConfidence(faceLandmarks),
   },
   {
     name: "SAD_DETECTED",
-    evaluate: ({ faceLandmarks }) => getSadConfidence(faceLandmarks)
+    evaluate: ({ faceLandmarks }) => getSadConfidence(faceLandmarks),
   },
   {
     name: "SURPRISED_DETECTED",
-    evaluate: ({ faceLandmarks }) => getSurprisedConfidence(faceLandmarks)
+    evaluate: ({ faceLandmarks }) => getSurprisedConfidence(faceLandmarks),
   },
   {
     name: "ARMS_RAISED_DETECTED",
-    evaluate: ({ pose }) => getArmsRaisedConfidence(pose)
+    evaluate: ({ pose }) => getArmsRaisedConfidence(pose),
   },
   {
     name: "PEACE_SIGN_DETECTED",
-    evaluate: ({ hands }) => getPeaceSignConfidence(hands)
+    evaluate: ({ hands }) => getPeaceSignConfidence(hands),
   },
   {
     name: "THUMBS_UP_DETECTED",
-    evaluate: ({ hands }) => getThumbsUpConfidence(hands)
-  }
+    evaluate: ({ hands }) => getThumbsUpConfidence(hands),
+  },
 ];
 
 export function startGestureEmitter() {
@@ -268,25 +272,25 @@ function evaluatePeaceSign(landmarks: NormalizedLandmark[]) {
     landmarks,
     HAND_LANDMARKS.indexTip,
     HAND_LANDMARKS.indexPip,
-    HAND_LANDMARKS.indexMcp
+    HAND_LANDMARKS.indexMcp,
   );
   const middleExtended = isFingerExtended(
     landmarks,
     HAND_LANDMARKS.middleTip,
     HAND_LANDMARKS.middlePip,
-    HAND_LANDMARKS.middleMcp
+    HAND_LANDMARKS.middleMcp,
   );
   const ringExtended = isFingerExtended(
     landmarks,
     HAND_LANDMARKS.ringTip,
     HAND_LANDMARKS.ringPip,
-    HAND_LANDMARKS.ringMcp
+    HAND_LANDMARKS.ringMcp,
   );
   const pinkyExtended = isFingerExtended(
     landmarks,
     HAND_LANDMARKS.pinkyTip,
     HAND_LANDMARKS.pinkyPip,
-    HAND_LANDMARKS.pinkyMcp
+    HAND_LANDMARKS.pinkyMcp,
   );
 
   if (!indexExtended || !middleExtended) {
@@ -304,7 +308,8 @@ function evaluatePeaceSign(landmarks: NormalizedLandmark[]) {
 
   const separation = distance2D(indexTip, middleTip);
   const base = distance2D(indexBase, middleBase);
-  const spreadScore = base > 0 ? clamp((separation / base - 0.4) / 0.6, 0, 1) : 0.5;
+  const spreadScore =
+    base > 0 ? clamp((separation / base - 0.4) / 0.6, 0, 1) : 0.5;
   const foldPenalty = (ringExtended ? 0.35 : 0) + (pinkyExtended ? 0.35 : 0);
 
   return clamp(0.7 + 0.3 * spreadScore - foldPenalty, 0, 1);
@@ -331,30 +336,33 @@ function evaluateThumbsUp(landmarks: NormalizedLandmark[]) {
     landmarks,
     HAND_LANDMARKS.indexTip,
     HAND_LANDMARKS.indexPip,
-    HAND_LANDMARKS.indexMcp
+    HAND_LANDMARKS.indexMcp,
   );
   const middleExtended = isFingerExtended(
     landmarks,
     HAND_LANDMARKS.middleTip,
     HAND_LANDMARKS.middlePip,
-    HAND_LANDMARKS.middleMcp
+    HAND_LANDMARKS.middleMcp,
   );
   const ringExtended = isFingerExtended(
     landmarks,
     HAND_LANDMARKS.ringTip,
     HAND_LANDMARKS.ringPip,
-    HAND_LANDMARKS.ringMcp
+    HAND_LANDMARKS.ringMcp,
   );
   const pinkyExtended = isFingerExtended(
     landmarks,
     HAND_LANDMARKS.pinkyTip,
     HAND_LANDMARKS.pinkyPip,
-    HAND_LANDMARKS.pinkyMcp
+    HAND_LANDMARKS.pinkyMcp,
   );
 
-  const extendedCount = [indexExtended, middleExtended, ringExtended, pinkyExtended].filter(
-    Boolean
-  ).length;
+  const extendedCount = [
+    indexExtended,
+    middleExtended,
+    ringExtended,
+    pinkyExtended,
+  ].filter(Boolean).length;
   const penalty = extendedCount * 0.2;
 
   return clamp(0.9 - penalty, 0, 1);
@@ -364,7 +372,7 @@ function isFingerExtended(
   landmarks: NormalizedLandmark[],
   tipIndex: number,
   pipIndex: number,
-  mcpIndex: number
+  mcpIndex: number,
 ) {
   const tip = landmarks[tipIndex];
   const pip = landmarks[pipIndex];

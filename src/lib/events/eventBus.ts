@@ -9,7 +9,7 @@ export const EVENT_NAMES = [
   "THUMBS_UP_DETECTED",
   "ARMS_RAISED_DETECTED",
   "SAD_DETECTED",
-  "SURPRISED_DETECTED"
+  "SURPRISED_DETECTED",
 ] as const;
 
 export type ReactionEventName = (typeof EVENT_NAMES)[number];
