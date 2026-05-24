@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { CanvasOverlay } from "@/components/CanvasOverlay";
+import { ReactionPanel } from "@/components/ReactionPanel";
 import { TrackingDebugPanel } from "@/components/TrackingDebugPanel";
 import { Webcam } from "@/components/Webcam";
 
@@ -26,10 +27,13 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="relative w-full max-w-5xl overflow-hidden rounded-lg border border-cyan-300/20 bg-black shadow-2xl shadow-cyan-950/50">
-          <Webcam videoRef={videoRef} />
-          <CanvasOverlay videoRef={videoRef} />
-          <TrackingDebugPanel videoRef={videoRef} />
+        <div className="grid w-full max-w-5xl grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="relative w-full overflow-hidden rounded-lg border border-cyan-300/20 bg-black shadow-2xl shadow-cyan-950/50">
+            <Webcam videoRef={videoRef} />
+            <CanvasOverlay videoRef={videoRef} />
+            <TrackingDebugPanel videoRef={videoRef} />
+          </div>
+          <ReactionPanel />
         </div>
       </section>
     </main>
