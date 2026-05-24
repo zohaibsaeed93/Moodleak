@@ -8,15 +8,16 @@ import { GestureStabilizer } from "@/lib/tracking/stabilizer";
 import { useTrackingStore } from "@/store/trackingStore";
 
 const COOLDOWN_MS = 1200;
-const REQUIRED_FRAMES = 4;
+const FACE_REQUIRED_FRAMES = 4;
+const HAND_REQUIRED_FRAMES = 2;
+const POSE_REQUIRED_FRAMES = 4;
 const HOLD_RELEASE_FRAMES = 3;
 const GLOBAL_WINDOW_MS = 500;
 const GLOBAL_MAX_GESTURES = 2;
 
 const FACE_CONFIDENCE_THRESHOLD = 0.82;
 const GESTURE_CONFIDENCE_THRESHOLD = 0.75;
-const HAND_VISIBILITY_THRESHOLD = 0.75;
-const POSE_VISIBILITY_THRESHOLD = 0.7;
+const POSE_VISIBILITY_THRESHOLD = 0.5;
 
 type GestureContext = {
   hands: HandLandmarkerResult | null;
@@ -111,20 +112,22 @@ const GESTURE_EVALUATORS: GestureEvaluator[] = [
 export function startGestureEmitter() {
   const lastEmitted: Partial<Record<ReactionEventName, number>> = {};
   const inactiveFrames: Partial<Record<ReactionEventName, number>> = {};
+  const consecutiveDetectedFrames: Partial<Record<ReactionEventName, number>> =
+    {};
   const activeGestures = new Set<ReactionEventName>();
   const stabilizers = new Map<ReactionEventName, GestureStabilizer>();
   const recentEmits: Array<{ name: ReactionEventName; time: number }> = [];
   let active = true;
   let rafId: number | null = null;
 
-  const getStabilizer = (name: ReactionEventName) => {
+  const getStabilizer = (name: ReactionEventName, type: GestureType) => {
     const existing = stabilizers.get(name);
     if (existing) {
       return existing;
     }
 
     const stabilizer = new GestureStabilizer({
-      requiredFrames: REQUIRED_FRAMES,
+      requiredFrames: getRequiredFramesByType(type),
       cooldownMs: COOLDOWN_MS,
     });
     stabilizers.set(name, stabilizer);
@@ -156,11 +159,20 @@ export function startGestureEmitter() {
 
     const { face, hands, pose } = useTrackingStore.getState();
     const faceLandmarks = face?.faceLandmarks?.[0] ?? null;
+
     const now = performance.now();
 
     for (const evaluator of GESTURE_EVALUATORS) {
       const score = evaluator.evaluate({ hands, pose, faceLandmarks });
       const isDetected = meetsThreshold(evaluator, score);
+
+      if (isDetected && evaluator.type === "hand") {
+        const consecutiveCount =
+          (consecutiveDetectedFrames[evaluator.name] ?? 0) + 1;
+        consecutiveDetectedFrames[evaluator.name] = consecutiveCount;
+      } else if (!isDetected) {
+        consecutiveDetectedFrames[evaluator.name] = 0;
+      }
 
       if (isDetected) {
         inactiveFrames[evaluator.name] = 0;
@@ -172,7 +184,7 @@ export function startGestureEmitter() {
         }
       }
 
-      const stabilizer = getStabilizer(evaluator.name);
+      const stabilizer = getStabilizer(evaluator.name, evaluator.type);
       const { emit } = stabilizer.update(isDetected, now);
       if (!emit) {
         continue;
@@ -303,19 +315,25 @@ function getArmsRaisedConfidence(pose: PoseLandmarkerResult | null) {
     return 0;
   }
 
-  if (!isVisible(leftShoulder) || !isVisible(rightShoulder)) {
+  if (
+    !isVisible(leftShoulder, POSE_VISIBILITY_THRESHOLD) ||
+    !isVisible(rightShoulder, POSE_VISIBILITY_THRESHOLD) ||
+    !isVisible(leftWrist, POSE_VISIBILITY_THRESHOLD) ||
+    !isVisible(rightWrist, POSE_VISIBILITY_THRESHOLD)
+  ) {
     return 0;
   }
 
-  const leftRaise = leftShoulder.y - leftWrist.y;
-  const rightRaise = rightShoulder.y - rightWrist.y;
-
-  if (leftRaise <= 0 || rightRaise <= 0) {
+  if (
+    leftWrist.y >= leftShoulder.y ||
+    leftWrist.y >= rightShoulder.y ||
+    rightWrist.y >= leftShoulder.y ||
+    rightWrist.y >= rightShoulder.y
+  ) {
     return 0;
   }
 
-  const minRaise = Math.min(leftRaise, rightRaise);
-  return clamp((minRaise - 0.06) / 0.18, 0, 1);
+  return 1;
 }
 
 function getArmsRaisedScore(pose: PoseLandmarkerResult | null): GestureScore {
@@ -324,7 +342,13 @@ function getArmsRaisedScore(pose: PoseLandmarkerResult | null): GestureScore {
     return { confidence, visibility: 0 };
   }
 
-  const visibility = averageVisibility(pose.landmarks[0]);
+  const landmarks = pose.landmarks[0];
+  const visibility = averageVisibility([
+    landmarks[POSE_LANDMARKS.leftShoulder],
+    landmarks[POSE_LANDMARKS.rightShoulder],
+    landmarks[POSE_LANDMARKS.leftWrist],
+    landmarks[POSE_LANDMARKS.rightWrist],
+  ]);
   return { confidence, visibility };
 }
 
@@ -336,7 +360,7 @@ function getPeaceSignScore(hands: HandLandmarkerResult | null): GestureScore {
   let best = 0;
   let bestVisibility = 0;
   for (const hand of hands.landmarks) {
-    const confidence = evaluatePeaceSign(hand);
+    const confidence = evaluatePeaceSign(hand) ? 1 : 0;
     const visibility = averageVisibility(hand);
     if (confidence > best) {
       best = confidence;
@@ -355,7 +379,7 @@ function getThumbsUpScore(hands: HandLandmarkerResult | null): GestureScore {
   let best = 0;
   let bestVisibility = 0;
   for (const hand of hands.landmarks) {
-    const confidence = evaluateThumbsUp(hand);
+    const confidence = evaluateThumbsUp(hand) ? 1 : 0;
     const visibility = averageVisibility(hand);
     if (confidence > best) {
       best = confidence;
@@ -383,100 +407,116 @@ function evaluatePeaceSign(landmarks: NormalizedLandmark[]) {
     landmarks,
     HAND_LANDMARKS.indexTip,
     HAND_LANDMARKS.indexPip,
-    HAND_LANDMARKS.indexMcp,
   );
   const middleExtended = isFingerExtended(
     landmarks,
     HAND_LANDMARKS.middleTip,
     HAND_LANDMARKS.middlePip,
-    HAND_LANDMARKS.middleMcp,
   );
-  const ringExtended = isFingerExtended(
+  const ringCurled = isFingerCurled(
     landmarks,
     HAND_LANDMARKS.ringTip,
     HAND_LANDMARKS.ringPip,
-    HAND_LANDMARKS.ringMcp,
   );
-  const pinkyExtended = isFingerExtended(
+  const pinkyCurled = isFingerCurled(
     landmarks,
     HAND_LANDMARKS.pinkyTip,
     HAND_LANDMARKS.pinkyPip,
-    HAND_LANDMARKS.pinkyMcp,
   );
 
-  if (!indexExtended || !middleExtended) {
-    return 0;
-  }
-
-  const indexTip = landmarks[HAND_LANDMARKS.indexTip];
-  const middleTip = landmarks[HAND_LANDMARKS.middleTip];
-  const indexBase = landmarks[HAND_LANDMARKS.indexMcp];
-  const middleBase = landmarks[HAND_LANDMARKS.middleMcp];
-
-  if (!indexTip || !middleTip || !indexBase || !middleBase) {
-    return 0;
-  }
-
-  const separation = distance2D(indexTip, middleTip);
-  const base = distance2D(indexBase, middleBase);
-  const spreadScore =
-    base > 0 ? clamp((separation / base - 0.4) / 0.6, 0, 1) : 0.5;
-  const foldPenalty = (ringExtended ? 0.35 : 0) + (pinkyExtended ? 0.35 : 0);
-
-  return clamp(0.7 + 0.3 * spreadScore - foldPenalty, 0, 1);
+  return indexExtended && middleExtended && ringCurled && pinkyCurled;
 }
 
 function evaluateThumbsUp(landmarks: NormalizedLandmark[]) {
   const thumbTip = landmarks[HAND_LANDMARKS.thumbTip];
   const thumbMcp = landmarks[HAND_LANDMARKS.thumbMcp];
   const wrist = landmarks[HAND_LANDMARKS.wrist];
-
-  if (!thumbTip || !thumbMcp || !wrist) {
-    return 0;
-  }
-
-  const thumbDistance = distance2D(thumbTip, wrist);
-  const thumbBaseDistance = distance2D(thumbMcp, wrist);
-  const thumbExtended = thumbDistance > thumbBaseDistance * 1.3;
-
-  if (!thumbExtended) {
-    return 0;
-  }
-
-  const indexExtended = isFingerExtended(
+  const indexCurled = isFingerCurled(
     landmarks,
     HAND_LANDMARKS.indexTip,
     HAND_LANDMARKS.indexPip,
-    HAND_LANDMARKS.indexMcp,
   );
-  const middleExtended = isFingerExtended(
+  const middleCurled = isFingerCurled(
     landmarks,
     HAND_LANDMARKS.middleTip,
     HAND_LANDMARKS.middlePip,
-    HAND_LANDMARKS.middleMcp,
   );
-  const ringExtended = isFingerExtended(
+  const ringCurled = isFingerCurled(
     landmarks,
     HAND_LANDMARKS.ringTip,
     HAND_LANDMARKS.ringPip,
-    HAND_LANDMARKS.ringMcp,
   );
-  const pinkyExtended = isFingerExtended(
+  const pinkyCurled = isFingerCurled(
     landmarks,
     HAND_LANDMARKS.pinkyTip,
     HAND_LANDMARKS.pinkyPip,
-    HAND_LANDMARKS.pinkyMcp,
   );
 
-  const extendedCount = [
-    indexExtended,
-    middleExtended,
-    ringExtended,
-    pinkyExtended,
-  ].filter(Boolean).length;
-  const penalty = extendedCount * 0.2;
+  if (!thumbTip || !thumbMcp || !wrist) {
+    return false;
+  }
 
-  return clamp(0.9 - penalty, 0, 1);
+  const thumbExtended = thumbTip.y < thumbMcp.y;
+
+  return (
+    thumbExtended && indexCurled && middleCurled && ringCurled && pinkyCurled
+  );
+}
+
+function evaluateOpenPalm(landmarks: NormalizedLandmark[]) {
+  const wrist = landmarks[HAND_LANDMARKS.wrist];
+  const thumbTip = landmarks[HAND_LANDMARKS.thumbTip];
+  const thumbMcp = landmarks[HAND_LANDMARKS.thumbMcp];
+
+  if (!wrist || !thumbTip || !thumbMcp) {
+    return false;
+  }
+
+  return (
+    isFingerExtended(
+      landmarks,
+      HAND_LANDMARKS.indexTip,
+      HAND_LANDMARKS.indexPip,
+    ) &&
+    isFingerExtended(
+      landmarks,
+      HAND_LANDMARKS.middleTip,
+      HAND_LANDMARKS.middlePip,
+    ) &&
+    isFingerExtended(
+      landmarks,
+      HAND_LANDMARKS.ringTip,
+      HAND_LANDMARKS.ringPip,
+    ) &&
+    isFingerExtended(
+      landmarks,
+      HAND_LANDMARKS.pinkyTip,
+      HAND_LANDMARKS.pinkyPip,
+    ) &&
+    Math.abs(thumbTip.x - wrist.x) > Math.abs(thumbMcp.x - wrist.x)
+  );
+}
+
+function evaluateFist(landmarks: NormalizedLandmark[]) {
+  return (
+    isFingerCurled(
+      landmarks,
+      HAND_LANDMARKS.indexTip,
+      HAND_LANDMARKS.indexPip,
+    ) &&
+    isFingerCurled(
+      landmarks,
+      HAND_LANDMARKS.middleTip,
+      HAND_LANDMARKS.middlePip,
+    ) &&
+    isFingerCurled(landmarks, HAND_LANDMARKS.ringTip, HAND_LANDMARKS.ringPip) &&
+    isFingerCurled(
+      landmarks,
+      HAND_LANDMARKS.pinkyTip,
+      HAND_LANDMARKS.pinkyPip,
+    ) &&
+    isThumbCurled(landmarks)
+  );
 }
 
 function meetsThreshold(evaluator: GestureEvaluator, score: GestureScore) {
@@ -489,9 +529,6 @@ function meetsThreshold(evaluator: GestureEvaluator, score: GestureScore) {
   }
 
   if (evaluator.type === "hand") {
-    if ((score.visibility ?? 0) < HAND_VISIBILITY_THRESHOLD) {
-      return false;
-    }
     return score.confidence >= GESTURE_CONFIDENCE_THRESHOLD;
   }
 
@@ -505,21 +542,58 @@ function meetsThreshold(evaluator: GestureEvaluator, score: GestureScore) {
   return score.confidence >= GESTURE_CONFIDENCE_THRESHOLD;
 }
 
+function getRequiredFramesByType(type: GestureType) {
+  if (type === "hand") {
+    return HAND_REQUIRED_FRAMES;
+  }
+
+  if (type === "pose") {
+    return POSE_REQUIRED_FRAMES;
+  }
+
+  return FACE_REQUIRED_FRAMES;
+}
+
 function isFingerExtended(
   landmarks: NormalizedLandmark[],
   tipIndex: number,
   pipIndex: number,
-  mcpIndex: number,
 ) {
   const tip = landmarks[tipIndex];
   const pip = landmarks[pipIndex];
-  const mcp = landmarks[mcpIndex];
 
-  if (!tip || !pip || !mcp) {
+  if (!tip || !pip) {
     return false;
   }
 
-  return tip.y < pip.y && pip.y < mcp.y;
+  return tip.y < pip.y;
+}
+
+function isFingerCurled(
+  landmarks: NormalizedLandmark[],
+  tipIndex: number,
+  pipIndex: number,
+) {
+  const tip = landmarks[tipIndex];
+  const pip = landmarks[pipIndex];
+
+  if (!tip || !pip) {
+    return false;
+  }
+
+  return tip.y > pip.y;
+}
+
+function isThumbCurled(landmarks: NormalizedLandmark[]) {
+  const wrist = landmarks[HAND_LANDMARKS.wrist];
+  const thumbTip = landmarks[HAND_LANDMARKS.thumbTip];
+  const thumbMcp = landmarks[HAND_LANDMARKS.thumbMcp];
+
+  if (!wrist || !thumbTip || !thumbMcp) {
+    return false;
+  }
+
+  return Math.abs(thumbTip.x - wrist.x) <= Math.abs(thumbMcp.x - wrist.x);
 }
 
 function isVisible(landmark: NormalizedLandmark, minVisibility = 0.5) {
