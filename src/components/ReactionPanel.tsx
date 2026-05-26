@@ -131,6 +131,11 @@ export function ReactionPanel() {
                 <span className="text-5xl leading-none">
                   {active.config.emoji}
                 </span>
+                {active.eventName.startsWith("COMBO_") ? (
+                  <span className="rounded-full border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-0.5 font-mono text-[0.6rem] uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                    COMBO
+                  </span>
+                ) : null}
                 <AnimatePresence mode="wait">
                   <motion.span
                     key={active.eventName}

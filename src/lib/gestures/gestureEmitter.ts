@@ -8,9 +8,11 @@ import { GestureStabilizer } from "@/lib/tracking/stabilizer";
 import { useTrackingStore } from "@/store/trackingStore";
 
 const COOLDOWN_MS = 1200;
+const COMBO_COOLDOWN_MS = 2000;
 const FACE_REQUIRED_FRAMES = 4;
 const HAND_REQUIRED_FRAMES = 2;
 const POSE_REQUIRED_FRAMES = 4;
+const COMBO_REQUIRED_FRAMES = 2;
 const HOLD_RELEASE_FRAMES = 3;
 const GLOBAL_WINDOW_MS = 500;
 const GLOBAL_MAX_GESTURES = 2;
@@ -23,9 +25,17 @@ type GestureContext = {
   hands: HandLandmarkerResult | null;
   pose: PoseLandmarkerResult | null;
   faceLandmarks: NormalizedLandmark[] | null;
+  smileScore: number;
+  sadScore: number;
+  surprisedScore: number;
 };
 
 type GestureType = "face" | "hand" | "pose";
+type ComboReactionEventName = Extract<ReactionEventName, `COMBO_${string}`>;
+type SingleReactionEventName = Exclude<
+  ReactionEventName,
+  ComboReactionEventName
+>;
 
 type GestureScore = {
   confidence: number;
@@ -33,9 +43,24 @@ type GestureScore = {
 };
 
 type GestureEvaluator = {
-  name: ReactionEventName;
+  name: SingleReactionEventName;
   type: GestureType;
   evaluate: (context: GestureContext) => GestureScore;
+};
+
+type ComboGestureScore = {
+  confidence: number;
+  isDetected: boolean;
+};
+
+type ComboGestureEvaluator = {
+  name: ComboReactionEventName;
+  label: string;
+  suppressEvents: SingleReactionEventName[];
+  evaluate: (
+    context: GestureContext,
+    detectedSingles: Map<SingleReactionEventName, boolean>,
+  ) => ComboGestureScore;
 };
 
 const FACE_LANDMARKS = {
@@ -74,22 +99,22 @@ const GESTURE_EVALUATORS: GestureEvaluator[] = [
   {
     name: "SMILE_DETECTED",
     type: "face",
-    evaluate: ({ faceLandmarks }) => ({
-      confidence: getSmileConfidence(faceLandmarks),
+    evaluate: ({ smileScore }) => ({
+      confidence: smileScore,
     }),
   },
   {
     name: "SAD_DETECTED",
     type: "face",
-    evaluate: ({ faceLandmarks }) => ({
-      confidence: getSadConfidence(faceLandmarks),
+    evaluate: ({ sadScore }) => ({
+      confidence: sadScore,
     }),
   },
   {
     name: "SURPRISED_DETECTED",
     type: "face",
-    evaluate: ({ faceLandmarks }) => ({
-      confidence: getSurprisedConfidence(faceLandmarks),
+    evaluate: ({ surprisedScore }) => ({
+      confidence: surprisedScore,
     }),
   },
   {
@@ -109,6 +134,74 @@ const GESTURE_EVALUATORS: GestureEvaluator[] = [
   },
 ];
 
+const COMBO_GESTURE_EVALUATORS: ComboGestureEvaluator[] = [
+  {
+    name: "COMBO_W_DETECTED",
+    label: "W Detected",
+    suppressEvents: ["THUMBS_UP_DETECTED", "SMILE_DETECTED"],
+    evaluate: ({ smileScore }, detectedSingles) => {
+      const thumbsUp = detectedSingles.get("THUMBS_UP_DETECTED") ?? false;
+      const isDetected = thumbsUp && smileScore >= 0.6;
+      return {
+        isDetected,
+        confidence: isDetected ? Math.min(smileScore, 1) : 0,
+      };
+    },
+  },
+  {
+    name: "COMBO_NPC_DETECTED",
+    label: "NPC Mode",
+    suppressEvents: ["PEACE_SIGN_DETECTED", "SURPRISED_DETECTED"],
+    evaluate: ({ surprisedScore }, detectedSingles) => {
+      const peaceSign = detectedSingles.get("PEACE_SIGN_DETECTED") ?? false;
+      const isDetected = peaceSign && surprisedScore >= 0.65;
+      return {
+        isDetected,
+        confidence: isDetected ? Math.min(surprisedScore, 1) : 0,
+      };
+    },
+  },
+  {
+    name: "COMBO_GIGACHAD_DETECTED",
+    label: "GigaChad",
+    suppressEvents: ["ARMS_RAISED_DETECTED", "SMILE_DETECTED"],
+    evaluate: ({ smileScore }, detectedSingles) => {
+      const armsRaised = detectedSingles.get("ARMS_RAISED_DETECTED") ?? false;
+      const isDetected = armsRaised && smileScore >= 0.6;
+      return {
+        isDetected,
+        confidence: isDetected ? Math.min(smileScore, 1) : 0,
+      };
+    },
+  },
+  {
+    name: "COMBO_L_DETECTED",
+    label: "L Detected",
+    suppressEvents: ["SAD_DETECTED"],
+    evaluate: ({ hands, sadScore }) => {
+      const hasDownwardThumb = hasVisibleThumbDown(hands);
+      const isDetected = sadScore >= 0.6 && hasDownwardThumb;
+      return {
+        isDetected,
+        confidence: isDetected ? Math.min(sadScore, 1) : 0,
+      };
+    },
+  },
+  {
+    name: "COMBO_CAUGHT_DETECTED",
+    label: "Caught",
+    suppressEvents: ["SURPRISED_DETECTED"],
+    evaluate: ({ hands, surprisedScore }) => {
+      const hasTwoHandsVisible = hands?.landmarks?.length === 2;
+      const isDetected = hasTwoHandsVisible && surprisedScore >= 0.65;
+      return {
+        isDetected,
+        confidence: isDetected ? Math.min(surprisedScore, 1) : 0,
+      };
+    },
+  },
+];
+
 export function startGestureEmitter() {
   const lastEmitted: Partial<Record<ReactionEventName, number>> = {};
   const inactiveFrames: Partial<Record<ReactionEventName, number>> = {};
@@ -120,15 +213,19 @@ export function startGestureEmitter() {
   let active = true;
   let rafId: number | null = null;
 
-  const getStabilizer = (name: ReactionEventName, type: GestureType) => {
+  const getStabilizer = (
+    name: ReactionEventName,
+    requiredFrames: number,
+    cooldownMs: number,
+  ) => {
     const existing = stabilizers.get(name);
     if (existing) {
       return existing;
     }
 
     const stabilizer = new GestureStabilizer({
-      requiredFrames: getRequiredFramesByType(type),
-      cooldownMs: COOLDOWN_MS,
+      requiredFrames,
+      cooldownMs,
     });
     stabilizers.set(name, stabilizer);
     return stabilizer;
@@ -159,12 +256,47 @@ export function startGestureEmitter() {
 
     const { face, hands, pose } = useTrackingStore.getState();
     const faceLandmarks = face?.faceLandmarks?.[0] ?? null;
+    const smileScore = getSmileConfidence(faceLandmarks);
+    const sadScore = getSadConfidence(faceLandmarks);
+    const surprisedScore = getSurprisedConfidence(faceLandmarks);
 
     const now = performance.now();
 
+    const context: GestureContext = {
+      hands,
+      pose,
+      faceLandmarks,
+      smileScore,
+      sadScore,
+      surprisedScore,
+    };
+
+    const singleScores = new Map<SingleReactionEventName, GestureScore>();
+    const detectedSingles = new Map<SingleReactionEventName, boolean>();
     for (const evaluator of GESTURE_EVALUATORS) {
-      const score = evaluator.evaluate({ hands, pose, faceLandmarks });
-      const isDetected = meetsThreshold(evaluator, score);
+      const score = evaluator.evaluate(context);
+      singleScores.set(evaluator.name, score);
+      detectedSingles.set(evaluator.name, meetsThreshold(evaluator, score));
+    }
+
+    const suppressedSingles = new Set<SingleReactionEventName>();
+    const comboScores = new Map<ComboReactionEventName, ComboGestureScore>();
+    for (const comboEvaluator of COMBO_GESTURE_EVALUATORS) {
+      const comboScore = comboEvaluator.evaluate(context, detectedSingles);
+      comboScores.set(comboEvaluator.name, comboScore);
+      if (!comboScore.isDetected) {
+        continue;
+      }
+
+      for (const suppressedEvent of comboEvaluator.suppressEvents) {
+        suppressedSingles.add(suppressedEvent);
+      }
+    }
+
+    for (const evaluator of GESTURE_EVALUATORS) {
+      const score = singleScores.get(evaluator.name) ?? { confidence: 0 };
+      const detectedRaw = detectedSingles.get(evaluator.name) ?? false;
+      const isDetected = detectedRaw && !suppressedSingles.has(evaluator.name);
 
       if (isDetected && evaluator.type === "hand") {
         const consecutiveCount =
@@ -184,7 +316,11 @@ export function startGestureEmitter() {
         }
       }
 
-      const stabilizer = getStabilizer(evaluator.name, evaluator.type);
+      const stabilizer = getStabilizer(
+        evaluator.name,
+        getRequiredFramesByType(evaluator.type),
+        COOLDOWN_MS,
+      );
       const { emit } = stabilizer.update(isDetected, now);
       if (!emit) {
         continue;
@@ -207,6 +343,53 @@ export function startGestureEmitter() {
       activeGestures.add(evaluator.name);
       eventBus.emit(evaluator.name, {
         confidence: score.confidence,
+        timestamp: now,
+      });
+    }
+
+    for (const comboEvaluator of COMBO_GESTURE_EVALUATORS) {
+      const comboScore = comboScores.get(comboEvaluator.name) ?? {
+        confidence: 0,
+        isDetected: false,
+      };
+
+      if (comboScore.isDetected) {
+        inactiveFrames[comboEvaluator.name] = 0;
+      } else {
+        const missedFrames = (inactiveFrames[comboEvaluator.name] ?? 0) + 1;
+        inactiveFrames[comboEvaluator.name] = missedFrames;
+        if (missedFrames >= HOLD_RELEASE_FRAMES) {
+          activeGestures.delete(comboEvaluator.name);
+        }
+      }
+
+      const stabilizer = getStabilizer(
+        comboEvaluator.name,
+        COMBO_REQUIRED_FRAMES,
+        COMBO_COOLDOWN_MS,
+      );
+      const { emit } = stabilizer.update(comboScore.isDetected, now);
+      if (!emit) {
+        continue;
+      }
+
+      if (activeGestures.has(comboEvaluator.name)) {
+        continue;
+      }
+
+      const lastTime = lastEmitted[comboEvaluator.name] ?? 0;
+      if (now - lastTime < COMBO_COOLDOWN_MS) {
+        continue;
+      }
+
+      if (!canEmitGlobal(comboEvaluator.name, now)) {
+        continue;
+      }
+
+      lastEmitted[comboEvaluator.name] = now;
+      activeGestures.add(comboEvaluator.name);
+      eventBus.emit(comboEvaluator.name, {
+        confidence: comboScore.confidence,
         timestamp: now,
       });
     }
@@ -461,6 +644,26 @@ function evaluateThumbsUp(landmarks: NormalizedLandmark[]) {
   return (
     thumbExtended && indexCurled && middleCurled && ringCurled && pinkyCurled
   );
+}
+
+function hasVisibleThumbDown(hands: HandLandmarkerResult | null) {
+  if (!hands?.landmarks?.length) {
+    return false;
+  }
+
+  for (const hand of hands.landmarks) {
+    const wrist = hand[HAND_LANDMARKS.wrist];
+    const thumbTip = hand[HAND_LANDMARKS.thumbTip];
+    if (!wrist || !thumbTip) {
+      continue;
+    }
+
+    if (thumbTip.y > wrist.y) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function evaluateOpenPalm(landmarks: NormalizedLandmark[]) {

@@ -10,6 +10,11 @@ export const EVENT_NAMES = [
   "ARMS_RAISED_DETECTED",
   "SAD_DETECTED",
   "SURPRISED_DETECTED",
+  "COMBO_W_DETECTED",
+  "COMBO_NPC_DETECTED",
+  "COMBO_GIGACHAD_DETECTED",
+  "COMBO_L_DETECTED",
+  "COMBO_CAUGHT_DETECTED",
 ] as const;
 
 export type ReactionEventName = (typeof EVENT_NAMES)[number];
