@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
+import { BackgroundSettings } from "@/components/BackgroundSettings";
 import {
   type ThemeId,
   type ThemeMode,
@@ -39,10 +40,11 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           />
           <motion.aside
             className="fixed bottom-0 right-0 top-0 z-50 flex w-full max-w-[24rem] flex-col border-l border-[var(--border)] bg-[color-mix(in_srgb,var(--bg-surface)_88%,transparent)] px-5 py-5 text-[var(--text-primary)] shadow-2xl shadow-black/20 backdrop-blur-2xl"
-            initial={{ x: "100%", opacity: 0.8 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: "100%", opacity: 0.8 }}
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 260 }}
+            style={{ willChange: "transform" }}
           >
             <div className="flex items-center justify-between">
               <div>
@@ -120,6 +122,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 ))}
               </div>
             </section>
+
+            <BackgroundSettings />
 
             <div className="mt-auto rounded-2xl border border-[var(--border)] bg-[var(--bg-base)] px-4 py-4">
               <p className="font-mono text-[0.64rem] uppercase tracking-[0.22em] text-[var(--text-muted)]">

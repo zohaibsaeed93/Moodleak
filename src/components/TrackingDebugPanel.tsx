@@ -4,6 +4,7 @@ import { RefObject, useEffect } from "react";
 import { formatResolution } from "@/lib/utils/format";
 import { useTrackingStore } from "@/store/trackingStore";
 import { useFPS } from "@/lib/utils/fps";
+import { useShallow } from "zustand/react/shallow";
 
 type TrackingDebugPanelProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -11,19 +12,25 @@ type TrackingDebugPanelProps = {
 
 export function TrackingDebugPanel({ videoRef }: TrackingDebugPanelProps) {
   const fps = useFPS();
-  const initialized = useTrackingStore((state) => state.initialized);
-  const webcamReady = useTrackingStore((state) => state.webcamReady);
-  const videoSize = useTrackingStore((state) => state.videoSize);
-  const faceCount = useTrackingStore(
-    (state) => state.face?.faceLandmarks.length ?? 0,
+  const {
+    initialized,
+    webcamReady,
+    videoSize,
+    faceCount,
+    handCount,
+    poseActive,
+    setVideoSize,
+  } = useTrackingStore(
+    useShallow((state) => ({
+      initialized: state.initialized,
+      webcamReady: state.webcamReady,
+      videoSize: state.videoSize,
+      faceCount: state.faceCount,
+      handCount: state.handCount,
+      poseActive: state.poseActive,
+      setVideoSize: state.setVideoSize,
+    })),
   );
-  const handCount = useTrackingStore(
-    (state) => state.hands?.landmarks.length ?? 0,
-  );
-  const poseActive = useTrackingStore(
-    (state) => (state.pose?.landmarks.length ?? 0) > 0,
-  );
-  const setVideoSize = useTrackingStore((state) => state.setVideoSize);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -39,7 +46,7 @@ export function TrackingDebugPanel({ videoRef }: TrackingDebugPanelProps) {
     };
 
     updateSize();
-    video.addEventListener("resize", updateSize);
+    video.addEventListener("resize", updateSize, { passive: true });
 
     return () => video.removeEventListener("resize", updateSize);
   }, [setVideoSize, videoRef]);

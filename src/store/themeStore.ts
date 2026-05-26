@@ -199,6 +199,33 @@ export function getThemeVars(themeId: ThemeId, mode: ThemeMode) {
   return themes[themeId].vars[mode];
 }
 
+let transitionTimeout: number | null = null;
+
+function applyThemeToDocument(
+  themeId: ThemeId,
+  mode: ThemeMode,
+  withTransition: boolean,
+) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const root = document.documentElement;
+  if (withTransition) {
+    root.classList.add("theme-transition");
+    if (transitionTimeout !== null) {
+      window.clearTimeout(transitionTimeout);
+    }
+    transitionTimeout = window.setTimeout(() => {
+      root.classList.remove("theme-transition");
+      transitionTimeout = null;
+    }, 350);
+  }
+
+  root.dataset.theme = `${themeId}-${mode}`;
+  root.dataset.mode = mode;
+}
+
 export const useThemeStore = create<ThemeState>((set, get) => ({
   themeId: "obsidian",
   mode: "dark",
@@ -206,10 +233,12 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     const mode = themes[themeId].mode;
     set({ themeId, mode });
     persistTheme(themeId, mode);
+    applyThemeToDocument(themeId, mode, true);
   },
   setMode: (mode) => {
     set({ mode });
     persistTheme(get().themeId, mode);
+    applyThemeToDocument(get().themeId, mode, true);
   },
   hydrate: () => {
     if (typeof window === "undefined") {
@@ -229,10 +258,15 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 
       if (isThemeId(parsed.themeId) && isMode(parsed.mode)) {
         set({ themeId: parsed.themeId, mode: parsed.mode });
+        applyThemeToDocument(parsed.themeId, parsed.mode, false);
+        return;
       }
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
     }
+
+    const { themeId, mode } = get();
+    applyThemeToDocument(themeId, mode, false);
   },
 }));
 

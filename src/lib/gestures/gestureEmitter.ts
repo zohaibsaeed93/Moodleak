@@ -5,7 +5,7 @@ import type {
 } from "@mediapipe/tasks-vision";
 import { eventBus, type ReactionEventName } from "@/lib/events/eventBus";
 import { GestureStabilizer } from "@/lib/tracking/stabilizer";
-import { useTrackingStore } from "@/store/trackingStore";
+import { getLiveTracking } from "@/store/trackingStore";
 
 const COOLDOWN_MS = 1200;
 const COMBO_COOLDOWN_MS = 2000;
@@ -254,7 +254,7 @@ export function startGestureEmitter() {
       return;
     }
 
-    const { face, hands, pose } = useTrackingStore.getState();
+    const { face, hands, pose } = getLiveTracking();
     const faceLandmarks = face?.faceLandmarks?.[0] ?? null;
     const smileScore = getSmileConfidence(faceLandmarks);
     const sadScore = getSadConfidence(faceLandmarks);

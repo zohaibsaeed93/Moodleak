@@ -8,22 +8,22 @@ import { Webcam } from "@/components/Webcam";
 import { useTrackingStore } from "@/store/trackingStore";
 import { useFPS } from "@/lib/utils/fps";
 import { Settings2 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const fps = useFPS();
-  const initialized = useTrackingStore((state) => state.initialized);
-  const webcamReady = useTrackingStore((state) => state.webcamReady);
-  const faceCount = useTrackingStore(
-    (state) => state.face?.faceLandmarks.length ?? 0,
-  );
-  const handCount = useTrackingStore(
-    (state) => state.hands?.landmarks.length ?? 0,
-  );
-  const poseActive = useTrackingStore(
-    (state) => (state.pose?.landmarks.length ?? 0) > 0,
-  );
+  const { initialized, webcamReady, faceCount, handCount, poseActive } =
+    useTrackingStore(
+      useShallow((state) => ({
+        initialized: state.initialized,
+        webcamReady: state.webcamReady,
+        faceCount: state.faceCount,
+        handCount: state.handCount,
+        poseActive: state.poseActive,
+      })),
+    );
   const trackingActive = initialized && webcamReady;
 
   return (

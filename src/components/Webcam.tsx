@@ -2,6 +2,7 @@
 
 import { RefObject, useEffect, useState } from "react";
 import { useTrackingStore } from "@/store/trackingStore";
+import { useShallow } from "zustand/react/shallow";
 
 type WebcamProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -9,8 +10,12 @@ type WebcamProps = {
 
 export function Webcam({ videoRef }: WebcamProps) {
   const [error, setError] = useState<string | null>(null);
-  const setWebcamReady = useTrackingStore((state) => state.setWebcamReady);
-  const setVideoSize = useTrackingStore((state) => state.setVideoSize);
+  const { setWebcamReady, setVideoSize } = useTrackingStore(
+    useShallow((state) => ({
+      setWebcamReady: state.setWebcamReady,
+      setVideoSize: state.setVideoSize,
+    })),
+  );
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -31,8 +36,8 @@ export function Webcam({ videoRef }: WebcamProps) {
             width: { ideal: 1280 },
             height: { ideal: 720 },
             frameRate: { ideal: 60, max: 60 },
-            facingMode: "user"
-          }
+            facingMode: "user",
+          },
         });
 
         if (!mounted || !videoElement) {
@@ -75,7 +80,7 @@ export function Webcam({ videoRef }: WebcamProps) {
           const video = event.currentTarget;
           setVideoSize({
             width: video.videoWidth,
-            height: video.videoHeight
+            height: video.videoHeight,
           });
           setWebcamReady(true);
         }}
@@ -84,7 +89,9 @@ export function Webcam({ videoRef }: WebcamProps) {
       {error ? (
         <div className="absolute inset-0 grid place-items-center bg-black/90 p-6 text-center">
           <div className="max-w-md border border-red-400/30 bg-red-500/10 p-5">
-            <p className="text-sm font-semibold text-red-100">Webcam unavailable</p>
+            <p className="text-sm font-semibold text-red-100">
+              Webcam unavailable
+            </p>
             <p className="mt-2 text-sm leading-6 text-red-100/70">{error}</p>
           </div>
         </div>

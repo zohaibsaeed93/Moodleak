@@ -122,6 +122,7 @@ export function ReactionPanel() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0 }}
               transition={{ type: "spring", stiffness: 280, damping: 22 }}
+              style={{ willChange: "transform, opacity" }}
             >
               <div
                 className="pointer-events-none absolute inset-8 rounded-full blur-3xl"
@@ -144,6 +145,7 @@ export function ReactionPanel() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.18 }}
+                    style={{ willChange: "transform, opacity" }}
                   >
                     {active.config.label}
                   </motion.span>
@@ -167,7 +169,10 @@ export function ReactionPanel() {
             >
               <motion.div
                 className="absolute h-28 w-28 rounded-full border border-[var(--accent)]"
-                style={{ boxShadow: "0 0 46px var(--accent-dim)" }}
+                style={{
+                  boxShadow: "0 0 46px var(--accent-dim)",
+                  willChange: "transform, opacity",
+                }}
                 animate={{
                   opacity: [0.18, 0.5, 0.18],
                   scale: [0.86, 1.08, 0.86],
@@ -217,6 +222,7 @@ export function ReactionPanel() {
                     exit={{ opacity: 0, x: 20 }}
                     transition={{ duration: 0.18, delay: index * 0.04 }}
                     className="flex items-center justify-between gap-3 rounded-lg px-1.5 py-1.5 text-xs transition hover:bg-[var(--bg-elevated)]"
+                    style={{ willChange: "transform, opacity" }}
                   >
                     <div className="flex min-w-0 items-center gap-2 text-[var(--text-primary)]">
                       <span className="text-base text-[var(--accent-text)]">
@@ -293,6 +299,7 @@ function ReactionMedia({ src, alt }: { src: string; alt: string }) {
             className="h-16 w-16 rounded-full border border-[var(--accent)]"
             animate={{ opacity: [0.24, 0.56, 0.24], scale: [0.9, 1.05, 0.9] }}
             transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+            style={{ willChange: "transform, opacity" }}
           />
         </div>
       )}
